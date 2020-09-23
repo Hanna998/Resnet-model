@@ -1,0 +1,81 @@
+import tensorflow as tf
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import \
+    Input, GlobalAveragePooling2D, Add, Dense, Activation, \
+    BatchNormalization, Conv2D, MaxPooling2D
+from tensorflow.keras import regularizers
+
+REGULARIZER_WEIGHT = 0.001
+
+class ResNet50(object):
+    '''
+    Reference:
+        "Deep Residual Learning for Image Recognition"
+        https://arxiv.org/abs/1512.03385
+    '''
+
+    def __init__(self, input_shape, output_dim):
+        x = Input(shape=input_shape)
+        h = Conv2D(64, kernel_size=(7, 7), strides=(2, 2), padding='same')(x)
+        h = BatchNormalization()(h)
+        h = Activation('relu')(h)
+        h = MaxPooling2D(pool_size=(3, 3), strides=(2, 2), padding='same')(h)
+        h = self._building_block(h, channel_out=256)
+        h = self._building_block(h, channel_out=256)
+        h = self._building_block(h, channel_out=256)
+        h = Conv2D(512, kernel_size=(1, 1), strides=(2, 2),
+                   kernel_regularizer=regularizers.l2(REGULARIZER_WEIGHT), )(h)
+        h = self._building_block(h, channel_out=512)
+        h = self._building_block(h, channel_out=512)
+        h = self._building_block(h, channel_out=512)
+        h = self._building_block(h, channel_out=512)
+        h = Conv2D(1024, kernel_size=(1, 1), strides=(2, 2),
+                   kernel_regularizer=regularizers.l2(REGULARIZER_WEIGHT))(h)
+        h = self._building_block(h, channel_out=1024)
+        h = self._building_block(h, channel_out=1024)
+        h = self._building_block(h, channel_out=1024)
+        h = self._building_block(h, channel_out=1024)
+        h = self._building_block(h, channel_out=1024)
+        h = self._building_block(h, channel_out=1024)
+        h = Conv2D(2048, kernel_size=(1, 1), strides=(2, 2),
+                   kernel_regularizer=regularizers.l2(REGULARIZER_WEIGHT))(h)
+        h = self._building_block(h, channel_out=2048)
+        h = self._building_block(h, channel_out=2048)
+        h = self._building_block(h, channel_out=2048)
+        h = GlobalAveragePooling2D()(h)
+        h = Dense(1000, activation='relu')(h)
+        y = Dense(output_dim, activation='softmax')(h)
+        self.model = Model(x, y)
+
+    def __call__(self):
+        return self.model
+
+    def _building_block(self, x, channel_out=256, is_relu=True):
+        channel = channel_out // 4
+        h = Conv2D(channel, kernel_size=(1, 1), padding='same',
+                   kernel_regularizer=regularizers.l2(REGULARIZER_WEIGHT))(x)
+        h = BatchNormalization()(h)
+        h = Activation('relu' if is_relu else tf.nn.leaky_relu)(h)
+        h = Conv2D(channel, kernel_size=(3, 3), padding='same',
+                   kernel_regularizer=regularizers.l2(REGULARIZER_WEIGHT))(h)
+        h = BatchNormalization()(h)
+        h = Activation('relu' if is_relu else tf.nn.leaky_relu)(h)
+        h = Conv2D(channel_out, kernel_size=(1, 1), padding='same',
+                   kernel_regularizer=regularizers.l2(REGULARIZER_WEIGHT))(h)
+        h = BatchNormalization()(h)
+        shortcut = self._shortcut(x, output_shape=h.get_shape().as_list())
+        h = Add()([h, shortcut])
+        return Activation('relu' if is_relu else tf.nn.leaky_relu)(h)
+
+    def _shortcut(self, x, output_shape):
+        input_shape = x.get_shape().as_list()
+        channel_in = input_shape[-1]
+        channel_out = output_shape[-1]
+
+        if channel_in != channel_out:
+            return self._projection(x, channel_out)
+        else:
+            return x
+
+    def _projection(self, x, channel_out):
+        return Conv2D(channel_out, kernel_size=(1, 1), padding='same')(x)
